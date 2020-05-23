@@ -7,7 +7,7 @@
 # 		a. Find all songs in video first
 #       b. Add to spotify (existing or create new)
 import json
-from typing import List, Dict
+from typing import List, Dict, Tuple
 
 # for YouTube AP
 import os
@@ -17,6 +17,12 @@ import googleapiclient.discovery
 import googleapiclient.errors
 import requests
 import youtube_dl
+
+# for spotify
+import sys
+
+import spotipy
+import spotipy.util as util
 
 
 class Playlist:
@@ -28,8 +34,22 @@ class Playlist:
 
     def __init__(self):
         self.youtube_client = self.get_youtube_client()
+        self.spotify_user_id = self.get_spotify_user_token()[0]
+        self.spotify_token = self.get_spotify_user_token()[1]
+        self.playlist_id = self.create_playlist()
         self.song_info = {}
 
+    '''
+    def create_or_add(self):
+        print("Create a new playlist or add?")
+        user_input = input()
+        if user_input == "Create": 
+            playlist_name = input()
+            return playlist_name 
+        else: 
+    '''
+
+    # Log into YouTube. Return the Youtube client.
     def get_youtube_client(self):
         """Log into YouTube. Return the Youtube client.
         """
@@ -51,6 +71,16 @@ class Playlist:
             api_service_name, api_version, credentials=credentials)
 
         return youtube_client
+
+    def get_spotify_user_token(self) -> Tuple[str, str]:
+        if len(sys.argv) > 3:
+            username = sys.argv[1]
+        else:
+            sys.exit()
+
+        scope = 'playlist-modify-public'
+        token = util.prompt_for_user_token(username, scope)
+        return username, token
 
     def get_yt_playlist(self, yt_playlist_id: str) -> None:
         """ Get a list of all the videos in a YouTube playlist with <yt_playlist_id>
@@ -99,6 +129,7 @@ class Playlist:
         playlist_id = playlist_url[beg_index + 5:]
         return playlist_id
 
+    # get the youtube video
     def get_yt_video(self, yt_video_url: str) -> None:
         """ Get video with <yt_video_url> and create a dictionary of
         important song info. (self.song_info)
@@ -125,25 +156,62 @@ class Playlist:
             }
 
     # 3. Log into Spotify & create a new playlist/ get existing playlist
-    def create_spotify_playlist(self):
-        # create playlist
-        # need python request library - can make http requests using python
-        x = {
-            "name": "John",
-            "age": 30,
-            "city": "New York"
-        }
+    def create_playlist(self):
+        """Create A New Playlist"""
+        request_body = json.dumps({
+            "name": "Youtube Liked Vids",
+            "description": "New Playlist",
+            "public": True
+        })
 
-        # convert into JSON:
-        y = json.dumps(x)
+        query = "https://api.spotify.com/v1/users/{}/playlists".format(
+            self.spotify_user_id)
+        response = requests.post(
+            query,
+            data=request_body,
+            headers={
+                "Content-Type": "application/json",
+                "Authorization": "Bearer {}".format(self.spotify_token)
+            }
+        )
+        response_json = response.json()
 
-        # the result is a JSON string:
-        print(y)
+        # playlist id
+        playlist_id = response_json["id"]
+        return playlist_id
 
-    # 4. Search for the song on
-    def get_song(self):
-        pass
+    def get_spotify_uri(self, song_name, artist):
+        """Search For the Song"""
+        query = "https://api.spotify.com/v1/search?query=track%3A{}+artist%3A{}&type=track&offset=0&limit=20".format(
+            song_name,
+            artist
+        )
+        response = requests.get(
+            query,
+            headers={
+                "Content-Type": "application/json",
+                "Authorization": "Bearer {}".format(self.spotify_token)
+            }
+        )
+        response_json = response.json()
+        songs = response_json["tracks"]["items"]
 
-    # 5. Add this song into the Spotify playlist
+        # only use the first song
+        uri = songs[0]["uri"]
+
+        return uri
+
+    # add songs to playlist
     def add_song_to_playlist(self):
-        pass
+        """Add all songs into a new Spotify playlist"""
+
+        if self.spotify_token:
+            sp = spotipy.Spotify(auth=self.spotify_token)
+            sp.trace = False
+            sp.user_playlist_add_tracks(self.spotify_user_id, self.playlist_id,
+                                        self.song_info.values())
+
+
+if __name__ == '__main__':
+    cp = Playlist()
+    cp.add_song_to_playlist()
